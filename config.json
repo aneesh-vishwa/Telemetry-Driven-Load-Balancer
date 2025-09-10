@@ -1,29 +1,34 @@
 {
   "port": 8443,
   "apiPort": 9000,
-  "tlsOptions": {
-    "key": "./server.key",
-    "cert": "./server.crt"
-  },
   "serverPools": [
     {
-      "name": "api_servers",
+      "name": "api_servers_stable",
       "servers": [
-        "http://localhost:3001",
-        "http://localhost:3002"
+        "http://host.docker.internal:3001",
+        "http://host.docker.internal:3002"
+      ]
+    },
+    {
+      "name": "api_servers_canary",
+      "servers": [
+        "http://host.docker.internal:3005"
       ]
     },
     {
       "name": "web_servers",
       "servers": [
-        "http://localhost:3003"
+        "http://host.docker.internal:3003"
       ]
     }
   ],
   "routingRules": [
     {
       "path": "/api",
-      "pool": "api_servers"
+      "pools": [
+        { "name": "api_servers_stable", "weight": 95 },
+        { "name": "api_servers_canary", "weight": 5 }
+      ]
     }
   ],
   "defaultPool": "web_servers"

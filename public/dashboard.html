@@ -17,22 +17,30 @@
                 View Live Traffic Monitor &rarr;
             </a>
         </div>
+
         <div id="metrics-section" class="mb-8">
             <h2 class="text-2xl font-semibold text-gray-200 border-b-2 border-gray-700 pb-2 mb-4">Live Pool Metrics</h2>
             <div id="metrics-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <p class="text-gray-500">Waiting for traffic...</p>
             </div>
         </div>
-        <div id="pools-section">
+
+        <div id="rules-section" class="mb-8">
+            <h2 class="text-2xl font-semibold text-gray-200 border-b-2 border-gray-700 pb-2 mb-4">Dynamic Routing Rules</h2>
+            <div id="rules-container" class="space-y-4"></div>
+        </div>
+
+        <div id="pools-section" class="mb-8">
             <h2 class="text-2xl font-semibold text-gray-200 border-b-2 border-gray-700 pb-2 mb-4">Server Pools</h2>
             <div id="pools-container" class="space-y-6"></div>
         </div>
+
         <div id="form-section" class="mt-8 bg-gray-800 p-6 rounded-lg shadow-lg">
-            <h3 class="text-xl font-semibold text-white mb-4">Add New Server</h3>
+             <h3 class="text-xl font-semibold text-white mb-4">Add New Server</h3>
             <form id="add-server-form" class="flex flex-col md:flex-row md:items-end gap-4">
                 <div class="flex-grow">
                     <label for="server-url" class="block text-sm font-medium text-gray-300 mb-1">Server URL</label>
-                    <input type="text" id="server-url" name="serverUrl" class="w-full bg-gray-700 border-gray-600 text-white rounded-md p-2 focus:ring-2 focus:ring-cyan-500" placeholder="http://localhost:3005" required>
+                    <input type="text" id="server-url" name="serverUrl" class="w-full bg-gray-700 border-gray-600 text-white rounded-md p-2 focus:ring-2 focus:ring-cyan-500" placeholder="http://host.docker.internal:3005" required>
                 </div>
                 <div>
                     <label for="pool-name" class="block text-sm font-medium text-gray-300 mb-1">To Pool</label>
@@ -42,8 +50,10 @@
             </form>
         </div>
     </div>
+
     <script>
         const apiBaseUrl = 'http://localhost:9000';
+
         async function fetchMetrics() {
             try {
                 const response = await fetch(`${apiBaseUrl}/metrics`);
@@ -70,6 +80,7 @@
                 document.getElementById('metrics-container').innerHTML = '<p class="text-red-500">Could not load metrics.</p>';
             }
         }
+
         async function fetchPools() {
             try {
                 const response = await fetch(`${apiBaseUrl}/pools`);
@@ -108,6 +119,88 @@
                 document.getElementById('pools-container').innerHTML = '<p class="text-red-500">Could not load server pools.</p>';
             }
         }
+
+        async function fetchRules() {
+            try {
+                const response = await fetch(`${apiBaseUrl}/api/config`);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const config = await response.json();
+                const rulesContainer = document.getElementById('rules-container');
+                rulesContainer.innerHTML = '';
+
+                config.routingRules.forEach(rule => {
+                    if (!rule.pools || rule.pools.length === 0) return;
+
+                    let slidersHtml = rule.pools.map(pool => `
+                        <div class="flex items-center gap-4">
+                            <label for="${pool.name}-slider" class="w-48 text-sm font-medium text-gray-300">${pool.name.replace(/_/g, ' ')}</label>
+                            <input type="range" id="${pool.name}-slider" min="0" max="100" value="${pool.weight}" class="flex-grow form-range h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                            <span id="${pool.name}-value" class="w-12 text-center font-mono bg-gray-600 rounded-md py-1">${pool.weight}%</span>
+                        </div>
+                    `).join('');
+
+                    rulesContainer.innerHTML += `
+                        <div class="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700">
+                            <h3 class="text-lg font-bold text-teal-400 mb-3">Traffic Splitting for Path: <span class="font-mono">${rule.path}</span></h3>
+                            <div class="space-y-3" id="rule-${rule.path.replace(/\//g, '')}-sliders">
+                                ${slidersHtml}
+                            </div>
+                            <button onclick="handleUpdateRule('${rule.path}')" class="mt-4 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-md transition-colors">Update Weights</button>
+                        </div>
+                    `;
+                });
+
+                config.routingRules.forEach(rule => {
+                    if (!rule.pools) return;
+                    rule.pools.forEach(pool => {
+                        const slider = document.getElementById(`${pool.name}-slider`);
+                        const valueSpan = document.getElementById(`${pool.name}-value`);
+                        if (slider) {
+                            slider.addEventListener('input', () => {
+                                valueSpan.textContent = `${slider.value}%`;
+                            });
+                        }
+                    });
+                });
+
+            } catch (error) {
+                console.error('Failed to fetch rules:', error);
+                document.getElementById('rules-container').innerHTML = '<p class="text-red-500">Could not load routing rules.</p>';
+            }
+        }
+        
+        async function handleUpdateRule(path) {
+            const slidersContainer = document.getElementById(`rule-${path.replace(/\//g, '')}-sliders`);
+            const inputs = slidersContainer.querySelectorAll('input[type="range"]');
+            
+            const pools = Array.from(inputs).map(input => {
+                return {
+                    name: input.id.replace('-slider', ''),
+                    weight: parseInt(input.value, 10)
+                };
+            });
+
+            try {
+                const response = await fetch(`${apiBaseUrl}/api/routing-rules`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path, pools })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText);
+                }
+                
+                alert('Routing rule updated successfully!');
+                fetchRules();
+
+            } catch (error) {
+                console.error('Failed to update rule:', error);
+                alert(`Error: Could not update rule. ${error.message}`);
+            }
+        }
+
         async function handleAddServer(event) {
             event.preventDefault();
             const form = event.target;
@@ -130,6 +223,7 @@
                 alert(`Error: Could not add server. ${error.message}`);
             }
         }
+
         async function handleRemoveServer(poolName, serverId) {
             if (!confirm('Are you sure you want to remove this server?')) return;
             try {
@@ -140,11 +234,16 @@
                 alert('Error: Could not remove server.');
             }
         }
+
         document.addEventListener('DOMContentLoaded', () => {
             fetchPools();
             fetchMetrics();
-            setInterval(fetchPools, 5000);
+            fetchRules();
             setInterval(fetchMetrics, 2000);
+            setInterval(() => {
+                fetchPools();
+                fetchRules(); // Also refresh rules periodically
+            }, 5000);
             document.getElementById('add-server-form').addEventListener('submit', handleAddServer);
         });
     </script>

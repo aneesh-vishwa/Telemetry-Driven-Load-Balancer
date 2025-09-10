@@ -52,6 +52,6 @@ ports.forEach(port => {
     server.listen(port, () => {
         // Assign roles based on your config.json for clearer logging
         const serverType = (port === 3003) ? "Web Server" : "API Server";
-        console.log(`✅ E-commerce Backend (${serverType}) running on http://localhost:${port}`);
+        console.log(`E-commerce Backend (${serverType}) running on http://localhost:${port}`);
     });
 });

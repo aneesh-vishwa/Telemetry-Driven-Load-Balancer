@@ -2,17 +2,8 @@ const tls = require('tls');
 const net = require('net');
 const crypto = require('crypto');
 const serverPool = require('./serverPool');
-const fs = require('fs');
-const path = require('path');
-
-// Load config and TLS options
-const config = require('../config.json');
-const tlsOptions = {
-     key: fs.readFileSync(config.tlsOptions.key),
-        cert: fs.readFileSync(config.tlsOptions.cert)
-};
-
-const sessions = {}; // In-memory store for sticky sessions: sessionId -> serverId
+const configManager = require('./configManager');
+const { runSecurityChecks } = require('./middleware/security.js');
 
 function getSessionId(requestData) {
     const headers = requestData.toString().split('\r\n');
@@ -24,49 +15,61 @@ function getSessionId(requestData) {
     return null;
 }
 
-function getPoolForRequest(requestData, config) {
+function getRuleForRequest(requestData) {
+    const config = configManager.getConfig(); // Get latest config on every request
     const firstLine = requestData.toString().split('\r\n')[0];
     const path = firstLine.split(' ')[1] || '/';
+
     const rule = config.routingRules.find(r => path.startsWith(r.path));
-    return rule ? rule.pool : config.defaultPool;
+    if (!rule) {
+        return { pool: config.defaultPool };
+    }
+    return rule;
 }
 
-function startBalancer(config, tlsOptions) {
+function startBalancer(initialConfig, tlsOptions, redisClient) {
     const server = tls.createServer(tlsOptions, clientSocket => {
-        clientSocket.once('data', (initialData) => {
+        clientSocket.once('data', async (initialData) => {
+            if (runSecurityChecks(clientSocket, initialData)) {
+                return;
+            }
+
             let backendServer;
             let isNewSession = false;
             const sessionId = getSessionId(initialData);
+            const rule = getRuleForRequest(initialData);
 
-            // --- REVISED AND FOOLPROOF LOGIC ---
-
-            // 1. Always determine the correct pool for this request first.
-            const poolName = getPoolForRequest(initialData, config);
-
-            // 2. Try to find a server using the sticky session ID.
-            if (sessionId && sessions[sessionId]) {
-                backendServer = serverPool.getServerById(sessions[sessionId]);
+            if (sessionId) {
+                try {
+                    const serverId = await redisClient.get(`session:${sessionId}`);
+                    if (serverId) {
+                        backendServer = serverPool.getServerById(serverId);
+                    }
+                } catch (err) {
+                    console.error("Redis error getting session:", err);
+                }
             }
 
-            // 3. If no sticky server was found (or it was unhealthy), use the load balancer.
             if (!backendServer) {
-                backendServer = serverPool.getNextServer(poolName);
-                isNewSession = true; // Mark as a new session if we're using the load balancer.
+                backendServer = serverPool.getNextServer(rule);
+                isNewSession = true;
             }
 
-            // 4. Final, single point of failure. If no server could be found, the service is down.
             if (!backendServer) {
-                console.error(`[CRITICAL] No healthy backend servers available for pool: ${poolName}`);
+                console.error(`[CRITICAL] No healthy backend servers available for rule matching path.`);
                 clientSocket.end('HTTP/1.1 503 Service Unavailable\r\n\r\n');
                 return;
             }
 
-            // 5. THE CRITICAL FIX: Now that we have a definitive server, count the request for BOTH the pool and the individual server.
-            serverPool.incrementRequestCount(poolName);
+            const poolName = Object.keys(serverPool.getPools()).find(pName => 
+                serverPool.getPools()[pName].servers.some(s => s.id === backendServer.id)
+            );
+
+            if (poolName) {
+                serverPool.incrementRequestCount(poolName);
+            }
             serverPool.incrementServerRequestCount(backendServer.id);
 
-
-            // --- PROCEED WITH CONNECTION ---
             const backendSocket = net.connect({
                 port: backendServer.url.port,
                 host: backendServer.url.hostname,
@@ -74,25 +77,26 @@ function startBalancer(config, tlsOptions) {
 
             serverPool.incrementConnections(backendServer.url);
 
-            let newSessionId = sessionId;
             if (isNewSession) {
-                newSessionId = crypto.randomBytes(16).toString('hex');
-                sessions[newSessionId] = backendServer.id;
-            }
-
-            let firstChunk = true;
-            if (isNewSession) {
-                backendSocket.on('data', responseData => {
-                    if (firstChunk) {
-                        let responseStr = responseData.toString();
-                        const cookieHeader = `Set-Cookie: session=${newSessionId}; HttpOnly; Path=/`;
-                        responseStr = responseStr.replace(/(\r\n\r\n)/, `\r\n${cookieHeader}\r\n\r\n`);
-                        clientSocket.write(responseStr);
-                        firstChunk = false;
-                    } else {
-                        clientSocket.write(responseData);
-                    }
-                });
+                const newSessionId = crypto.randomBytes(16).toString('hex');
+                try {
+                    await redisClient.set(`session:${newSessionId}`, backendServer.id, { EX: 3600 });
+                    let firstChunk = true;
+                    backendSocket.on('data', responseData => {
+                        if (firstChunk) {
+                            let responseStr = responseData.toString();
+                            const cookieHeader = `Set-Cookie: session=${newSessionId}; HttpOnly; Path=/; Secure`;
+                            responseStr = responseStr.replace(/(\r\n\r\n)/, `\r\n${cookieHeader}\r\n\r\n`);
+                            clientSocket.write(responseStr);
+                            firstChunk = false;
+                        } else {
+                            clientSocket.write(responseData);
+                        }
+                    });
+                } catch (err) {
+                     console.error("Redis error setting session:", err);
+                     backendSocket.pipe(clientSocket);
+                }
             } else {
                 backendSocket.pipe(clientSocket);
             }
@@ -100,10 +104,7 @@ function startBalancer(config, tlsOptions) {
             backendSocket.write(initialData);
             clientSocket.pipe(backendSocket);
 
-            const onSocketEnd = () => {
-                serverPool.decrementConnections(backendServer.url);
-            };
-
+            const onSocketEnd = () => serverPool.decrementConnections(backendServer.url);
             clientSocket.on('close', onSocketEnd);
             backendSocket.on('close', onSocketEnd);
             clientSocket.on('error', (err) => { console.error('Client socket error:', err.message); });
@@ -115,12 +116,11 @@ function startBalancer(config, tlsOptions) {
         });
     });
 
-    server.listen(config.port, () => {
-        console.log(`L7 Secure Load Balancer (Least Connections) listening on port ${config.port}`);
+    server.listen(initialConfig.port, () => {
+        console.log(`L7 Secure Load Balancer (w/ Weighted Routing) listening on port ${initialConfig.port}`);
     });
 
     return server;
 }
 
 module.exports = startBalancer;
-

@@ -1,14 +1,14 @@
 const fs = require('fs');
-const http = require('http');
-const https = require('https');
 
-// --- Configuration (TUNED FOR STABILITY) ---
+// --- NEW: Globally disable certificate validation for this script ---
+// This is for local development only and should not be used in production.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+// --- Configuration ---
 const config = {
     userCount: 8,
     loadBalancerUrl: 'https://localhost:8443',
     logFile: 'simulation.log',
-    httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-    httpAgent: new http.Agent({ keepAlive: false }),
 };
 
 // --- Logger ---
@@ -20,21 +20,20 @@ const log = (message) => {
     process.stdout.write(logMessage);
 };
 
-// --- User Actions ---
+// --- User Actions (No 'agent' needed in fetch calls) ---
 const actions = {
     async visitHomepage(userId) {
         log(`User-${userId}: Visiting homepage (/)`);
-        await fetch(`${config.loadBalancerUrl}/`, { agent: config.httpsAgent });
+        await fetch(`${config.loadBalancerUrl}/`);
     },
     async searchProducts(userId) {
         log(`User-${userId}: Searching for products (/api/search)`);
-        await fetch(`${config.loadBalancerUrl}/api/search?q=laptops`, { agent: config.httpsAgent });
+        await fetch(`${config.loadBalancerUrl}/api/search?q=laptops`);
     },
     async addToCart(userId) {
         log(`User-${userId}: Adding item to cart (/api/cart)`);
         await fetch(`${config.loadBalancerUrl}/api/cart`, {
             method: 'POST',
-            agent: config.httpsAgent,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ itemId: 'abc-456' }),
         });
@@ -60,6 +59,7 @@ class User {
                     await actions.addToCart(this.id);
                 }
             } catch (error) {
+                // Now, the error will be more specific if it's not a cert issue
                 log(`User-${this.id}: ERROR - ${error.message}`);
             }
             const randomDelay = 1000 + Math.random() * 2000;

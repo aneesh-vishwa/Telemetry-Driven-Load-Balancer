@@ -82,6 +82,62 @@ function decrementConnections(serverUrl) {
   if (server) server.connections = Math.max(0, server.connections - 1);
 }
 
+// Helper function to find the server with the minimum requests in a given list
+function getLeastBusyServer(servers) {
+    let bestServer = null;
+    let minRequests = Infinity;
+
+    servers.forEach((server) => {
+        if (server.healthy && server.requests < minRequests) {
+            minRequests = server.requests;
+            bestServer = server;
+        }
+    });
+
+    return bestServer;
+}
+
+// NEW weighted load balancing function
+function getNextServer(rule) {
+  // If the rule points to a single, simple pool name (for backward compatibility or default rule)
+  if (rule.pool) {
+    const pool = pools[rule.pool];
+    if (!pool) return null;
+    return getLeastBusyServer(pool.servers);
+  }
+
+  // New weighted logic
+  if (rule.pools) {
+    const totalWeight = rule.pools.reduce((sum, p) => sum + p.weight, 0);
+    let randomNum = Math.random() * totalWeight;
+
+    let chosenPoolName;
+    for (const poolInfo of rule.pools) {
+      // Find healthy servers in this pool before considering it
+      const healthyServers = pools[poolInfo.name]?.servers.filter(s => s.healthy);
+      if (!healthyServers || healthyServers.length === 0) {
+        continue; // Skip this pool if it has no healthy servers
+      }
+
+      randomNum -= poolInfo.weight;
+      if (randomNum <= 0) {
+        chosenPoolName = poolInfo.name;
+        break;
+      }
+    }
+    
+    // Fallback in case random selection fails (e.g., all pools in rule are unhealthy)
+    if (!chosenPoolName) return null; 
+
+    const chosenPool = pools[chosenPoolName];
+    if (!chosenPool) return null;
+
+    return getLeastBusyServer(chosenPool.servers);
+  }
+
+  return null;
+}
+
 module.exports = {
   initializePools,
   incrementRequestCount,
@@ -101,20 +157,7 @@ module.exports = {
     }
     return null;
   },
-  getNextServer: (poolName = defaultPoolName) => {
-    const pool = pools[poolName];
-    if (!pool || pool.servers.length === 0) return null;
-    let bestServer = null;
-    let minRequests = Infinity;
-    pool.servers.forEach((server) => {
-      if (server.healthy && server.requests < minRequests) {
-        minRequests = server.requests;
-        bestServer = server;
-      }
-    });
-    return bestServer;
-  },
-
+  getNextServer,
   addServer: (poolName, serverUrl) => {
     const pool = pools[poolName];
     if (!pool) return false;

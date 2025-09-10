@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8443:8443"
+      - "9000:9000"
+    volumes:
+      # Mount certificates into the container
+      - ./server.key:/usr/src/app/server.key
+      - ./server.crt:/usr/src/app/server.crt
+      # Mount config for initial pool setup
+      - ./config.json:/usr/src/app/config.json
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
+  redis:
+    image: "redis:alpine"
+    ports:
+      - "6379:6379"     

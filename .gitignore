@@ -1,6 +1,8 @@
 node_modules/
 *.key
 *.crt
-
-.package.json
-.package-lock.json
+package-lock.json
+package.json
+.env
+.env.example
+*.log
