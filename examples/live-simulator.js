@@ -6,7 +6,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 // --- Configuration ---
 const config = {
-    userCount: 8,
+    userCount: 100,
     loadBalancerUrl: 'https://localhost:8443',
     logFile: 'simulation.log',
 };

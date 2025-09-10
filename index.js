@@ -9,6 +9,11 @@ const startBalancer = require('./src/balancer');
 const { startHealthChecks } = require('./src/healthCheck');
 const { startApiServer } = require('./src/api');
 const serverPool = require('./src/serverPool');
+const connectDB = require('./src/database');
+
+// --- Connect to Database ---
+connectDB();
+
 
 // --- Step 1: Initialize Redis Client ---
 const redisClient = createRedisClient();

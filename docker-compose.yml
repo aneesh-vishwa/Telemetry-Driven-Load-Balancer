@@ -5,17 +5,31 @@ services:
       - "8443:8443"
       - "9000:9000"
     volumes:
-      # Mount certificates into the container
       - ./server.key:/usr/src/app/server.key
       - ./server.crt:/usr/src/app/server.crt
-      # Mount config for initial pool setup
       - ./config.json:/usr/src/app/config.json
     env_file:
       - .env
     depends_on:
       - redis
+      - mongo # <-- Add dependency on mongo
 
   redis:
     image: "redis:alpine"
     ports:
-      - "6379:6379"     
+      - "6379:6379"
+
+  # --- NEW MONGO SERVICE ---
+  mongo:
+    image: mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: user
+      MONGO_INITDB_ROOT_PASSWORD: password
+    volumes:
+      - mongo-data:/data/db
+
+# --- NEW VOLUME DEFINITION ---
+volumes:
+  mongo-data:

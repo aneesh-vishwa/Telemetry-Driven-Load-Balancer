@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Control Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 flex items-center justify-center min-h-screen">
+    <div class="w-full max-w-md">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-lg border border-gray-700">
+            <h1 class="text-3xl font-bold text-cyan-400 mb-2 text-center">Control Panel Login</h1>
+            <p class="text-gray-400 mb-6 text-center">Please sign in to continue.</p>
+            
+            <form action="/api/users/login" method="POST">
+                <div class="mb-4">
+                    <label for="email" class="block text-sm font-medium text-gray-300 mb-1">Email Address</label>
+                    <input type="email" id="email" name="email" class="w-full bg-gray-700 border-gray-600 text-white rounded-md p-2 focus:ring-2 focus:ring-cyan-500" required>
+                </div>
+                <div class="mb-6">
+                    <label for="password" class="block text-sm font-medium text-gray-300 mb-1">Password</label>
+                    <input type="password" id="password" name="password" class="w-full bg-gray-700 border-gray-600 text-white rounded-md p-2 focus:ring-2 focus:ring-cyan-500" required>
+                </div>
+                <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-md transition-colors">Login</button>
+            </form>
+
+            <p class="text-center text-gray-500 text-sm mt-6">
+                Don't have an account? <a href="/signup.html" class="text-teal-400 hover:underline">Sign Up</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
