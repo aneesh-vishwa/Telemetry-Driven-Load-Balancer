@@ -17,7 +17,6 @@ services:
       TLS_CERT_PATH: "/usr/src/app/server.crt"
       REDIS_URL: "redis://redis:6379"
       MONGO_URI: "mongodb://user:password@mongo:27017/admin"
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       redis:
         condition: service_healthy
